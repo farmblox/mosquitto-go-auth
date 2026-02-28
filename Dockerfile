@@ -1,41 +1,16 @@
 # Define Mosquitto version, see also .github/workflows/build_and_push_docker_images.yml for
 # the automatically built images
-ARG MOSQUITTO_VERSION=2.0.18
-# Define libwebsocket version
-ARG LWS_VERSION=4.2.2
+ARG MOSQUITTO_VERSION=2.1.2
 
 # Use debian:stable-slim as a builder for Mosquitto and dependencies.
-FROM debian:stable-slim as mosquitto_builder
+FROM debian:stable-slim AS mosquitto_builder
 ARG MOSQUITTO_VERSION
-ARG LWS_VERSION
 
 # Get mosquitto build dependencies.
+# Mosquitto 2.1+ has built-in websockets support, so libwebsockets is no longer needed.
 RUN set -ex; \
     apt-get update; \
-    apt-get install -y wget build-essential cmake libssl-dev libcjson-dev
-
-# Get libwebsocket. Debian's libwebsockets is too old for Mosquitto version > 2.x so it gets built from source.
-RUN set -ex; \
-    wget https://github.com/warmcat/libwebsockets/archive/v${LWS_VERSION}.tar.gz -O /tmp/lws.tar.gz; \
-    mkdir -p /build/lws; \
-    tar --strip=1 -xf /tmp/lws.tar.gz -C /build/lws; \
-    rm /tmp/lws.tar.gz; \
-    cd /build/lws; \
-    cmake . \
-        -DCMAKE_BUILD_TYPE=MinSizeRel \
-        -DCMAKE_INSTALL_PREFIX=/usr \
-        -DLWS_IPV6=ON \
-        -DLWS_WITHOUT_BUILTIN_GETIFADDRS=ON \
-        -DLWS_WITHOUT_CLIENT=ON \
-        -DLWS_WITHOUT_EXTENSIONS=ON \
-        -DLWS_WITHOUT_TESTAPPS=ON \
-        -DLWS_WITH_HTTP2=OFF \
-        -DLWS_WITH_SHARED=OFF \
-        -DLWS_WITH_ZIP_FOPS=OFF \
-        -DLWS_WITH_ZLIB=OFF \
-        -DLWS_WITH_EXTERNAL_POLL=ON; \
-    make -j "$(nproc)"; \
-    rm -rf /root/.cmake
+    apt-get install -y wget build-essential cmake libssl-dev libcjson-dev libedit-dev libmicrohttpd-dev libsqlite3-dev
 
 WORKDIR /app
 
@@ -45,10 +20,10 @@ RUN wget http://mosquitto.org/files/source/mosquitto-${MOSQUITTO_VERSION}.tar.gz
 
 RUN tar xzvf mosquitto-${MOSQUITTO_VERSION}.tar.gz
 
-# Build mosquitto.
+# Build mosquitto with built-in websockets (no libwebsockets needed in 2.1+).
 RUN set -ex; \
     cd mosquitto-${MOSQUITTO_VERSION}; \
-    make CFLAGS="-Wall -O2 -I/build/lws/include" LDFLAGS="-L/build/lws/lib" WITH_WEBSOCKETS=yes; \
+    make -j "$(nproc)" CFLAGS="-Wall -O2" WITH_WEBSOCKETS=yes; \
     make install;
 
 # Use golang:latest as a builder for the Mosquitto Go Auth plugin.
@@ -84,6 +59,9 @@ RUN set -ex; \
 
 WORKDIR /app
 COPY --from=mosquitto_builder /usr/local/include/ /usr/local/include/
+
+# Mosquitto 2.1+ headers depend on cJSON
+RUN apt-get update && apt-get install -y libcjson-dev
 
 COPY ./ ./
 RUN set -ex; \

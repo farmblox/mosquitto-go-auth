@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unsafe"
 
 	bes "github.com/iegomez/mosquitto-go-auth/backends"
 	"github.com/iegomez/mosquitto-go-auth/cache"
@@ -421,6 +422,76 @@ func setUsername(username, clientid string) string {
 	}
 
 	return username
+}
+
+// authResult holds the outcome of an async authentication check.
+type authResult struct {
+	clientid string
+	result   uint8
+}
+
+// pendingResults is a buffered channel that goroutines push completed auth
+// results into. The tick callback drains this from the main mosquitto thread.
+var pendingResults = make(chan authResult, 256)
+
+// AuthUnpwdCheckAsync starts the username/password check in a goroutine and
+// returns immediately. The result is pushed onto pendingResults for the tick
+// callback to pick up via DrainAuthResults.
+//
+//export AuthUnpwdCheckAsync
+func AuthUnpwdCheckAsync(username, password, clientid *C.char) {
+	u := C.GoString(username)
+	p := C.GoString(password)
+	c := C.GoString(clientid)
+
+	go func() {
+		var ok bool
+		var err error
+
+		for try := 0; try <= authPlugin.retryCount; try++ {
+			ok, err = authUnpwdCheck(u, p, c)
+			if err == nil {
+				break
+			}
+		}
+
+		var res uint8
+		if err != nil {
+			log.Error(err)
+			res = AuthError
+		} else if ok {
+			res = AuthGranted
+		} else {
+			res = AuthRejected
+		}
+
+		pendingResults <- authResult{clientid: c, result: res}
+	}()
+}
+
+// DrainAuthResults is called from the C tick callback on the main mosquitto
+// thread. It non-blocking drains up to maxResults completed auth results into
+// the provided C arrays. Returns the number of results drained.
+//
+// The C side is responsible for calling free() on each clientid string.
+//
+//export DrainAuthResults
+func DrainAuthResults(clientids **C.char, results *uint8, maxResults C.int) C.int {
+	clientidSlice := unsafe.Slice(clientids, int(maxResults))
+	resultSlice := unsafe.Slice(results, int(maxResults))
+
+	count := 0
+	for count < int(maxResults) {
+		select {
+		case r := <-pendingResults:
+			clientidSlice[count] = C.CString(r.clientid)
+			resultSlice[count] = r.result
+			count++
+		default:
+			return C.int(count)
+		}
+	}
+	return C.int(count)
 }
 
 func main() {}
