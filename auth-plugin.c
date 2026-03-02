@@ -47,9 +47,22 @@ int mosquitto_plugin_init(mosquitto_plugin_id_t *identifier, void **user_data,
   AuthPluginInit(keysSlice, valuesSlice, opts_count, versionArray);
 
   // Register callbacks for the v5 plugin API.
-  mosquitto_callback_register(plg_id, MOSQ_EVT_BASIC_AUTH, basic_auth_callback, NULL, NULL);
-  mosquitto_callback_register(plg_id, MOSQ_EVT_ACL_CHECK, acl_check_callback, NULL, NULL);
-  mosquitto_callback_register(plg_id, MOSQ_EVT_TICK, tick_callback, NULL, NULL);
+  int rc;
+  rc = mosquitto_callback_register(plg_id, MOSQ_EVT_BASIC_AUTH, basic_auth_callback, NULL, NULL);
+  if (rc != MOSQ_ERR_SUCCESS) {
+    fprintf(stderr, "error: failed to register basic auth callback (%d)\n", rc);
+    return rc;
+  }
+  rc = mosquitto_callback_register(plg_id, MOSQ_EVT_ACL_CHECK, acl_check_callback, NULL, NULL);
+  if (rc != MOSQ_ERR_SUCCESS) {
+    fprintf(stderr, "error: failed to register acl check callback (%d)\n", rc);
+    return rc;
+  }
+  rc = mosquitto_callback_register(plg_id, MOSQ_EVT_TICK, tick_callback, NULL, NULL);
+  if (rc != MOSQ_ERR_SUCCESS) {
+    fprintf(stderr, "error: failed to register tick callback (%d)\n", rc);
+    return rc;
+  }
 
   return MOSQ_ERR_SUCCESS;
 }
