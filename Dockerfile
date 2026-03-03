@@ -42,17 +42,22 @@ COPY --from=tonistiigi/xx:golang / /
 RUN go env
 
 # Install needed libc and gcc for target platform.
+# Go requires the gold linker for ARM external linking; newer Debian base images
+# no longer bundle it, so we symlink the default ld as a stand-in.
 RUN set -ex; \
   if [ ! -z "$TARGETPLATFORM" ]; then \
     case "$TARGETPLATFORM" in \
   "linux/arm64") \
-    apt update && apt install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross \
+    apt update && apt install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross && \
+    ln -sf /usr/bin/aarch64-linux-gnu-ld /usr/bin/aarch64-linux-gnu-ld.gold \
     ;; \
   "linux/arm/v7") \
-    apt update && apt install -y gcc-arm-linux-gnueabihf libc6-dev-armhf-cross \
+    apt update && apt install -y gcc-arm-linux-gnueabihf libc6-dev-armhf-cross && \
+    ln -sf /usr/bin/arm-linux-gnueabihf-ld /usr/bin/arm-linux-gnueabihf-ld.gold \
     ;; \
   "linux/arm/v6") \
-    apt update && apt install -y gcc-arm-linux-gnueabihf libc6-dev-armel-cross libc6-dev-armhf-cross \
+    apt update && apt install -y gcc-arm-linux-gnueabihf libc6-dev-armel-cross libc6-dev-armhf-cross && \
+    ln -sf /usr/bin/arm-linux-gnueabihf-ld /usr/bin/arm-linux-gnueabihf-ld.gold \
     ;; \
   esac \
   fi
