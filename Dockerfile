@@ -1,41 +1,16 @@
 # Define Mosquitto version, see also .github/workflows/build_and_push_docker_images.yml for
 # the automatically built images
-ARG MOSQUITTO_VERSION=2.0.18
-# Define libwebsocket version
-ARG LWS_VERSION=4.2.2
+ARG MOSQUITTO_VERSION=2.1.2
 
 # Use debian:stable-slim as a builder for Mosquitto and dependencies.
-FROM debian:stable-slim as mosquitto_builder
+FROM debian:stable-slim AS mosquitto_builder
 ARG MOSQUITTO_VERSION
-ARG LWS_VERSION
 
 # Get mosquitto build dependencies.
+# Mosquitto 2.1+ has built-in websockets support, so libwebsockets is no longer needed.
 RUN set -ex; \
     apt-get update; \
-    apt-get install -y wget build-essential cmake libssl-dev libcjson-dev
-
-# Get libwebsocket. Debian's libwebsockets is too old for Mosquitto version > 2.x so it gets built from source.
-RUN set -ex; \
-    wget https://github.com/warmcat/libwebsockets/archive/v${LWS_VERSION}.tar.gz -O /tmp/lws.tar.gz; \
-    mkdir -p /build/lws; \
-    tar --strip=1 -xf /tmp/lws.tar.gz -C /build/lws; \
-    rm /tmp/lws.tar.gz; \
-    cd /build/lws; \
-    cmake . \
-        -DCMAKE_BUILD_TYPE=MinSizeRel \
-        -DCMAKE_INSTALL_PREFIX=/usr \
-        -DLWS_IPV6=ON \
-        -DLWS_WITHOUT_BUILTIN_GETIFADDRS=ON \
-        -DLWS_WITHOUT_CLIENT=ON \
-        -DLWS_WITHOUT_EXTENSIONS=ON \
-        -DLWS_WITHOUT_TESTAPPS=ON \
-        -DLWS_WITH_HTTP2=OFF \
-        -DLWS_WITH_SHARED=OFF \
-        -DLWS_WITH_ZIP_FOPS=OFF \
-        -DLWS_WITH_ZLIB=OFF \
-        -DLWS_WITH_EXTERNAL_POLL=ON; \
-    make -j "$(nproc)"; \
-    rm -rf /root/.cmake
+    apt-get install -y wget build-essential cmake libssl-dev libcjson-dev libedit-dev libmicrohttpd-dev libsqlite3-dev
 
 WORKDIR /app
 
@@ -45,14 +20,16 @@ RUN wget http://mosquitto.org/files/source/mosquitto-${MOSQUITTO_VERSION}.tar.gz
 
 RUN tar xzvf mosquitto-${MOSQUITTO_VERSION}.tar.gz
 
-# Build mosquitto.
+# Build mosquitto with built-in websockets (no libwebsockets needed in 2.1+).
 RUN set -ex; \
     cd mosquitto-${MOSQUITTO_VERSION}; \
-    make CFLAGS="-Wall -O2 -I/build/lws/include" LDFLAGS="-L/build/lws/lib" WITH_WEBSOCKETS=yes; \
+    make -j "$(nproc)" CFLAGS="-Wall -O2" WITH_WEBSOCKETS=yes; \
     make install;
 
-# Use golang:latest as a builder for the Mosquitto Go Auth plugin.
-FROM --platform=$BUILDPLATFORM golang:latest AS go_auth_builder
+# Use golang as a builder for the Mosquitto Go Auth plugin.
+# Pin to bookworm: trixie's cross-compilation binutils no longer include the
+# gold linker, which Go requires for ARM external linking.
+FROM --platform=$BUILDPLATFORM golang:1.24-bookworm AS go_auth_builder
 
 ENV CGO_CFLAGS="-I/usr/local/include -fPIC"
 ENV CGO_LDFLAGS="-shared -Wl,-unresolved-symbols=ignore-all"
@@ -70,6 +47,9 @@ RUN go env
 RUN set -ex; \
   if [ ! -z "$TARGETPLATFORM" ]; then \
     case "$TARGETPLATFORM" in \
+  "linux/amd64") \
+    apt update && apt install -y gcc-x86-64-linux-gnu libc6-dev-amd64-cross \
+    ;; \
   "linux/arm64") \
     apt update && apt install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross \
     ;; \
@@ -85,6 +65,9 @@ RUN set -ex; \
 WORKDIR /app
 COPY --from=mosquitto_builder /usr/local/include/ /usr/local/include/
 
+# Mosquitto 2.1+ headers depend on cJSON
+RUN apt-get update && apt-get install -y libcjson-dev
+
 COPY ./ ./
 RUN set -ex; \
     go build -buildmode=c-archive go-auth.go; \
@@ -96,7 +79,7 @@ FROM debian:stable-slim
 
 RUN set -ex; \
     apt update; \
-    apt install -y libc-ares2 openssl uuid tini wget libssl-dev libcjson-dev
+    apt install -y libc-ares2 openssl uuid tini wget libssl-dev libcjson-dev libmicrohttpd12
 
 RUN mkdir -p /var/lib/mosquitto /var/log/mosquitto
 RUN set -ex; \
