@@ -47,6 +47,9 @@ RUN go env
 RUN set -ex; \
   if [ ! -z "$TARGETPLATFORM" ]; then \
     case "$TARGETPLATFORM" in \
+  "linux/amd64") \
+    apt update && apt install -y gcc-x86-64-linux-gnu libc6-dev-amd64-cross \
+    ;; \
   "linux/arm64") \
     apt update && apt install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross \
     ;; \
@@ -76,7 +79,7 @@ FROM debian:stable-slim
 
 RUN set -ex; \
     apt update; \
-    apt install -y libc-ares2 openssl uuid tini wget libssl-dev libcjson-dev
+    apt install -y libc-ares2 openssl uuid tini wget libssl-dev libcjson-dev libmicrohttpd12
 
 RUN mkdir -p /var/lib/mosquitto /var/log/mosquitto
 RUN set -ex; \
