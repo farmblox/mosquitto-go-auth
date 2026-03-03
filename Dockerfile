@@ -26,8 +26,10 @@ RUN set -ex; \
     make -j "$(nproc)" CFLAGS="-Wall -O2" WITH_WEBSOCKETS=yes; \
     make install;
 
-# Use golang:latest as a builder for the Mosquitto Go Auth plugin.
-FROM --platform=$BUILDPLATFORM golang:latest AS go_auth_builder
+# Use golang as a builder for the Mosquitto Go Auth plugin.
+# Pin to bookworm: trixie's cross-compilation binutils no longer include the
+# gold linker, which Go requires for ARM external linking.
+FROM --platform=$BUILDPLATFORM golang:1.24-bookworm AS go_auth_builder
 
 ENV CGO_CFLAGS="-I/usr/local/include -fPIC"
 ENV CGO_LDFLAGS="-shared -Wl,-unresolved-symbols=ignore-all"
@@ -42,22 +44,17 @@ COPY --from=tonistiigi/xx:golang / /
 RUN go env
 
 # Install needed libc and gcc for target platform.
-# Go requires the gold linker for ARM external linking; newer Debian base images
-# no longer bundle it, so we symlink the default ld as a stand-in.
 RUN set -ex; \
   if [ ! -z "$TARGETPLATFORM" ]; then \
     case "$TARGETPLATFORM" in \
   "linux/arm64") \
-    apt update && apt install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross && \
-    ln -sf /usr/bin/aarch64-linux-gnu-ld /usr/bin/aarch64-linux-gnu-ld.gold \
+    apt update && apt install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross \
     ;; \
   "linux/arm/v7") \
-    apt update && apt install -y gcc-arm-linux-gnueabihf libc6-dev-armhf-cross && \
-    ln -sf /usr/bin/arm-linux-gnueabihf-ld /usr/bin/arm-linux-gnueabihf-ld.gold \
+    apt update && apt install -y gcc-arm-linux-gnueabihf libc6-dev-armhf-cross \
     ;; \
   "linux/arm/v6") \
-    apt update && apt install -y gcc-arm-linux-gnueabihf libc6-dev-armel-cross libc6-dev-armhf-cross && \
-    ln -sf /usr/bin/arm-linux-gnueabihf-ld /usr/bin/arm-linux-gnueabihf-ld.gold \
+    apt update && apt install -y gcc-arm-linux-gnueabihf libc6-dev-armel-cross libc6-dev-armhf-cross \
     ;; \
   esac \
   fi
